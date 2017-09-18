@@ -14,12 +14,9 @@ from urlparse import urlparse
 import json
 import webapp2
 from basehandler.basehandler import BaseHandler
-from model.inbound_requests import InboundRequest
-import model.inbound_requests
+from model.forward_mappings import ForwardMappings
 import StringIO
 import http_access
-
-FORWARDING_URL = 'https://module-http-bin-dot-mq-bi-data-surface.appspot.com'
 
 class EchoHandler(BaseHandler):
     """Handles search requests for comments."""
@@ -59,12 +56,18 @@ class ReverseProxyHandler(BaseHandler):
     """Handles search requests for comments."""
 
     @staticmethod
-    def log_method(title, end, method, url, headers, content):
+    def log_method(title, end, from_url, to_url, method, url, headers, content):
         sio = StringIO.StringIO()
         try:
-            sio.write('\n')
+            sio.write('\n')            
             sio.write(title)
             sio.write('\n')
+            sio.write('from: ')
+            sio.write(from_url)
+            sio.write('\n')
+            sio.write('to: ')
+            sio.write(to_url)
+            sio.write('\n\n')
             sio.write(method) 
             sio.write(' ')
             sio.write(url)
@@ -75,6 +78,7 @@ class ReverseProxyHandler(BaseHandler):
             if content != None and content != '':
                 sio.write('body truncated (128):\n')
                 sio.write(content[:128])
+            sio.write('\n')
             sio.write(end)
             sio.write('\n\n')
             logging.info(sio.getvalue())
@@ -85,15 +89,24 @@ class ReverseProxyHandler(BaseHandler):
         """Handles a get request with a query."""
         sent = False
         try:
-            url = '{}{}'.format(FORWARDING_URL, self.request.path)
-            ReverseProxyHandler.log_method('====REVERSE PROXY REQUEST=======\n', '====END PROXY REQUEST=======\n', self.request.method, url, self.request.headers, self.request.body)               
+            forwarding_url = ForwardMappings.get_forward_to_url(self.request.path)
+            if forwarding_url == None:
+                #no mapping found so quite
+                self.response.write('could not find forwarding mapping for : {}'.format(str(self.request.path)))
+                self.response.set_status(404)
+                return
+
+
+            url = '{}{}'.format(forwarding_url, self.request.path)
+            ReverseProxyHandler.log_method('====REVERSE PROXY REQUEST=======\n', '====END PROXY REQUEST=======\n', self.request.host, forwarding_url, self.request.method, url, self.request.headers, self.request.body)               
+            
             #pass onto to destination url
             resp_code, resp_content, resp_headers = http_access.fetch_get(url, self.request.headers, None)
             self.response.set_status(resp_code)
             for key, value in resp_headers.items():
                 self.response.headers[key] = value
             sent = True
-            ReverseProxyHandler.log_method('====REVERSE PROXY RESPONSE=======\n', '====END PROXY RESPONSE=======\n', self.request.method, url, self.response.headers, resp_content)               
+            ReverseProxyHandler.log_method('====REVERSE PROXY RESPONSE=======\n', '====END PROXY RESPONSE=======\n', forwarding_url, self.request.host, self.request.method, self.request.path, self.response.headers, resp_content)               
             self.response.write(resp_content)
             return
             
@@ -102,14 +115,31 @@ class ReverseProxyHandler(BaseHandler):
                 self.response.write('error trying to proxy: {}'.format(str(e)))
                 self.response.set_status(404)
 
+    def put(self):
+        """Handles a put request with a query."""
+        self.handle_postput(as_post = False)
+
     def post(self):
         """Handles a post request with a query."""
+        self.handle_postput()
+        
+    def handle_postput(self, as_post = True):
         sent = False
         try:
-            url = '{}{}'.format(FORWARDING_URL, self.request.path)
+            forwarding_url = ForwardMappings.get_forward_to_url(self.request.path)
+            if forwarding_url == None:
+                #no mapping found so quite
+                self.response.write('could not find forwarding mapping for : {}'.format(str(self.request.path)))
+                self.response.set_status(404)
+                return
+
+            url = '{}{}'.format(forwarding_url, self.request.path)
             ReverseProxyHandler.log_method('====REVERSE PROXY REQUEST=======\n', '====END PROXY REQUEST=======\n', self.request.method, url, self.request.headers, self.request.body)               
             #pass onto to destination url
-            resp_code, resp_content, resp_headers = http_access.fetch_post(url, self.request.headers, self.request.body, None)
+            if as_post == True:
+                resp_code, resp_content, resp_headers = http_access.fetch_post(url, self.request.headers, self.request.body, None)
+            else:
+                resp_code, resp_content, resp_headers = http_access.fetch_put(url, self.request.headers, self.request.body, None)
             self.response.set_status(resp_code)
             for key, value in resp_headers.items():
                 self.response.headers[key] = value
@@ -126,6 +156,8 @@ class ReverseProxyHandler(BaseHandler):
 
 
 logging.getLogger().setLevel(logging.DEBUG)
+
+ForwardMappings.init()
 
 application = webapp2.WSGIApplication([
     ('/.*', ReverseProxyHandler)

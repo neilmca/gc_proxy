@@ -1,0 +1,11 @@
+module: proxy
+runtime: python27
+threadsafe: true
+api_version: 1
+
+handlers: 
+- url: .*
+  script: handlers.root.application
+
+
+
