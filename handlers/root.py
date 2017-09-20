@@ -56,7 +56,7 @@ class ReverseProxyHandler(BaseHandler):
     """Handles search requests for comments."""
 
     @staticmethod
-    def log_method(title, end, from_url, to_url, method, url, headers, content):
+    def log_method(title, end, from_url, to_url, method, url, headers, content, resp_code = None):
         sio = StringIO.StringIO()
         try:
             sio.write('\n')            
@@ -71,7 +71,10 @@ class ReverseProxyHandler(BaseHandler):
             sio.write(method) 
             sio.write(' ')
             sio.write(url)
-            sio.write('\n\n')                
+            sio.write('\n\n')      
+            if resp_code != None:
+                sio.write(resp_code)
+                sio.write('\n')
             for key, value in headers.items():
                 sio.write(key + ':' + value +'\n')
             sio.write('\n\n')
@@ -87,9 +90,41 @@ class ReverseProxyHandler(BaseHandler):
 
     def get(self):
         """Handles a get request with a query."""
+        self.handler(self.request.method)
+
+    def put(self):
+        """Handles a put request with a query."""
+        self.handler(self.request.method)
+
+    def post(self):
+        """Handles a post request with a query."""
+        self.handler(self.request.method)
+
+    def handler(self, method):
         sent = False
         try:
-            forwarding_url = ForwardMappings.get_forward_to_url(self.request.path)
+            #remove channel from path
+            #logging.info(self.request.path)
+            paths = self.request.path.split('/')
+            #logging.info(paths)
+            channel = '0' #default
+            path_without_channel = ''
+            if len(paths) > 1:
+                new_path = ''
+                first_item = True
+                for item in paths[1:]:
+                    #logging.info(item)
+                    if item.isdigit() and first_item == True:
+                        channel = str(item)
+                        first_item = False
+                    else:                
+                        new_path +=  '/'
+                        new_path += item
+                path_without_channel = new_path
+                         
+            #logging.info(self.request.path)
+            #logging.info(path_without_channel)
+            forwarding_url = ForwardMappings.get_forward_to_url(channel, path_without_channel)
             if forwarding_url == None:
                 #no mapping found so quite
                 self.response.write('could not find forwarding mapping for : {}'.format(str(self.request.path)))
@@ -97,16 +132,30 @@ class ReverseProxyHandler(BaseHandler):
                 return
 
 
-            url = '{}{}'.format(forwarding_url, self.request.path)
+            url = '{}{}'.format(forwarding_url, path_without_channel)
+            #logging.info(self.request.query)
+            if self.request.query != None and self.request.query != '':
+                url += '?{}'.format(self.request.query)
             ReverseProxyHandler.log_method('====REVERSE PROXY REQUEST=======\n', '====END PROXY REQUEST=======\n', self.request.host, forwarding_url, self.request.method, url, self.request.headers, self.request.body)               
             
             #pass onto to destination url
-            resp_code, resp_content, resp_headers = http_access.fetch_get(url, self.request.headers, None)
+            resp_code = ''
+            resp_content = ''
+            resp_headers = {}
+
+            if method == 'POST':
+                resp_code, resp_content, resp_headers = http_access.fetch_post(url, self.request.headers, self.request.body, None)
+            elif method == 'PUT':
+                resp_code, resp_content, resp_headers = http_access.fetch_put(url, self.request.headers, self.request.body, None)
+            else: #GET
+                resp_code, resp_content, resp_headers = http_access.fetch_get(url, self.request.headers, None)              
+
             self.response.set_status(resp_code)
-            for key, value in resp_headers.items():
-                self.response.headers[key] = value
+            if resp_headers != None:
+                for key, value in resp_headers.items():
+                    self.response.headers[key] = value
             sent = True
-            ReverseProxyHandler.log_method('====REVERSE PROXY RESPONSE=======\n', '====END PROXY RESPONSE=======\n', forwarding_url, self.request.host, self.request.method, self.request.path, self.response.headers, resp_content)               
+            ReverseProxyHandler.log_method('====REVERSE PROXY RESPONSE=======\n', '====END PROXY RESPONSE=======\n', forwarding_url, self.request.host, self.request.method, path_without_channel, self.response.headers, resp_content, resp_code)               
             self.response.write(resp_content)
             return
             
@@ -114,37 +163,30 @@ class ReverseProxyHandler(BaseHandler):
             if not sent:
                 self.response.write('error trying to proxy: {}'.format(str(e)))
                 self.response.set_status(404)
-
-    def put(self):
-        """Handles a put request with a query."""
-        self.handle_postput(as_post = False)
-
-    def post(self):
-        """Handles a post request with a query."""
-        self.handle_postput()
         
-    def handle_postput(self, as_post = True):
+    def handle_getpostput(self, method):
         sent = False
         try:
             forwarding_url = ForwardMappings.get_forward_to_url(self.request.path)
             if forwarding_url == None:
-                #no mapping found so quite
+                #no mapping found so quit
                 self.response.write('could not find forwarding mapping for : {}'.format(str(self.request.path)))
                 self.response.set_status(404)
                 return
 
             url = '{}{}'.format(forwarding_url, self.request.path)
-            ReverseProxyHandler.log_method('====REVERSE PROXY REQUEST=======\n', '====END PROXY REQUEST=======\n', self.request.method, url, self.request.headers, self.request.body)               
+            ReverseProxyHandler.log_method('====REVERSE PROXY REQUEST=======\n', '====END PROXY REQUEST=======\n', self.request.host, forwarding_url, self.request.method, url, self.request.headers, self.request.body)                          
             #pass onto to destination url
             if as_post == True:
                 resp_code, resp_content, resp_headers = http_access.fetch_post(url, self.request.headers, self.request.body, None)
             else:
                 resp_code, resp_content, resp_headers = http_access.fetch_put(url, self.request.headers, self.request.body, None)
             self.response.set_status(resp_code)
+
             for key, value in resp_headers.items():
                 self.response.headers[key] = value
             sent = True
-            ReverseProxyHandler.log_method('====REVERSE PROXY RESPONSE=======\n', '====END PROXY RESPONSE=======\n', self.request.method, url, self.response.headers, resp_content)               
+            ReverseProxyHandler.log_method('====REVERSE PROXY RESPONSE=======\n', '====END PROXY RESPONSE=======\n', forwarding_url, self.request.host, self.request.method, path_without_channel, self.response.headers, resp_content, resp_code)               
             self.response.write(resp_content)
             return
             

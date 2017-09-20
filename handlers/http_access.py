@@ -28,11 +28,11 @@ def fetch_it(url, headers_dict=None, payload='', query_params_dict=None, sendAsP
         logging.info('fetch_it = %s' % url)
         result = urlfetch.fetch(url=url, payload=payload,
                                 method=method, headers=headers_dict)
-
-    except urlfetch.Error:
-        logging.exception('Caught exception fetching url')
-
-    return result.status_code,  result.content, result.headers
+        return result.status_code,  result.content, result.headers
+    except urlfetch.Error as ex:
+        logging.exception(ex)
+        return 500, None, {}
+    
 
 
 def fetch_get(url, headers_dict=None, query_params_dict=None):
@@ -47,7 +47,9 @@ def fetch_get(url, headers_dict=None, query_params_dict=None):
 
         logging.info('fetch_get = %s' % url)
         result = urlfetch.fetch(url=url, headers=headers, method=urlfetch.GET)
-    except urlfetch.Error:
-        logging.exception('Caught exception fetching url')
+        return result.status_code,  result.content, result.headers
+    except urlfetch.Error as ex:
+        logging.exception(ex)
+        return 500, None, {}
 
-    return result.status_code,  result.content, result.headers
+    

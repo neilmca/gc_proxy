@@ -11,20 +11,22 @@ from datetime import timedelta
 class ForwardMappings(ndb.Model):
     inbound_path_predicate = ndb.StringProperty(indexed=False)
     forward_to_url = ndb.StringProperty(indexed=False)
+    channel = ndb.StringProperty(indexed=True)
     
     
     @staticmethod
     def init():
-        logging.info('ForwardMappings.init')
+        #logging.info('ForwardMappings.init')
         records = ForwardMappings.query().fetch(keys_only=True)
+        #logging.info(records)
         if len(records) == 0:
-            rc = ForwardMappings(inbound_path_predicate = "*", forward_to_url = "localhost:8888")
+            rc = ForwardMappings(inbound_path_predicate = "*", forward_to_url = "localhost:8888", channel = '0')
             rc.put()
 
     @staticmethod
-    def get_forward_to_url(path = None):
+    def get_forward_to_url(channel = '0', path = None):
 
-        mappings = ForwardMappings.query().fetch()
+        mappings = ForwardMappings.query(ForwardMappings.channel == channel).fetch()
         #logging.info(str(mappings))
         #logging.info('path = %s' % path)
         forward_to_url = None
@@ -38,6 +40,8 @@ class ForwardMappings(ndb.Model):
                 if map.inbound_path_predicate in path:
                     forward_to_url = map.forward_to_url
 
+        if forward_to_url != None:        
+            logging.info('found mapping for %s to channel=%s, url=%s' % (path, channel, forward_to_url))
         return forward_to_url
 
        
