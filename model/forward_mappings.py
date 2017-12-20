@@ -44,4 +44,24 @@ class ForwardMappings(ndb.Model):
             logging.info('found mapping for %s to channel=%s, url=%s' % (path, channel, forward_to_url))
         return forward_to_url
 
+    @staticmethod
+    def put_mapppings(channel, mapping_dict = None):
+
+        new_rows = []
+        for item in mapping_dict:
+            predicate = item['predicate']
+            forward_to_url = item['forward_to_url']
+            if predicate is None or predicate == '' or forward_to_url is None or forward_to_url == '':
+                return 400, 'mappings missing value'
+            rc = ForwardMappings(inbound_path_predicate = predicate, forward_to_url = forward_to_url, channel = channel)
+            new_rows.append(rc)
+
+        if len(new_rows) > 0:
+            #delete existing for this channel
+            existing_mappings = ForwardMappings.query(ForwardMappings.channel == channel).fetch(keys_only = True)
+            ndb.delete_multi(existing_mappings)
+            #replace with new
+            ndb.put_multi(new_rows)
+
+        return 200, ''
        

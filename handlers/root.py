@@ -18,6 +18,9 @@ from model.forward_mappings import ForwardMappings
 import StringIO
 import http_access
 
+API_KEY_NAME = 'X-API-KEY'
+
+
 class EchoHandler(BaseHandler):
     """Handles search requests for comments."""
 
@@ -51,6 +54,68 @@ class EchoHandler(BaseHandler):
         """Handles a get request with a query."""
 
         self.response.write('post response')
+
+class AdminHandler(BaseHandler):
+
+    def get(self):
+        """Handles a get request with a query."""
+
+    def put(self):
+        """Handles a put request to update the proxy destinations
+        Supports proxy routing per channel
+        E.g. 
+
+        PUT /admin/channel/0
+
+        [
+          {
+            "predicate": "*",
+            "forward_to_url": "localhost:yyyy"
+          },
+          {
+            "predicate": "x",
+            "forward_to_url": "localhost:xxx"
+          }
+        ]
+        """
+        api_key_value = os.getenv('API_KEY-VALUE')
+        
+        if api_key_value is None or api_key_value == '':
+            self.response.set_status(401)
+            self.response.write('PUTs disabled as no auth key set')
+            return
+
+        auth = ''
+        for key, value in self.request.headers.items():
+            #logging.info('%s:%s' % (key, value))
+            if key.lower() == API_KEY_NAME.lower():
+                auth = value
+                break
+        if auth != api_key_value:
+            logging.info('auth key should be %s' % (api_key_value))
+            self.response.set_status(401)
+            self.response.write('auth failed')
+            return
+        
+        channel = ''
+        if 'channel' in self.request.path:
+            paths = self.request.path.split('/')
+            #last part should be channel - which we say must be digit
+            last = len(paths)
+            channel = paths[last-1]
+            if channel.isdigit() == False:
+                channel = ''
+        
+        if channel != '':
+            #get json body
+            body = json.loads(self.request.body)
+
+            #update mapping in datastore
+            status, message = ForwardMappings.put_mapppings(channel, body)
+            self.response.set_status(status)
+            self.response.write(message)
+        
+
 
 class ReverseProxyHandler(BaseHandler):
     """Handles search requests for comments."""
@@ -202,6 +267,7 @@ logging.getLogger().setLevel(logging.DEBUG)
 ForwardMappings.init()
 
 application = webapp2.WSGIApplication([
+    ('/admin.*', AdminHandler),
     ('/.*', ReverseProxyHandler)
 
 ],
